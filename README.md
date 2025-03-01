@@ -15,23 +15,23 @@ This is an Book review API that allows users to add reviews of books, edit their
 
 1. **Clone the repository**
 
-2. **Setup a virtual environment**
+2. **Setup a virtual environment:**
     python -m venv venv
     source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-3. **Install Dependencies**
+3. **Install Dependencies:**
     pip install -r requirements.txt
 
-4. **Set up the database**
+4. **Set up the database:**
     alembic upgrade head
 
-5. **Run the FastAPI server**
+5. **Run the FastAPI server:**
     uvicorn main:app --reload
 
-6. **Access API documentation** (Swagger UI)
+6. **Access API documentation:** (Swagger UI)
     http://127.0.0.1:8000/docs
 
-7. **Running the test**
+7. **Running the test:**
     pytest
 
 
