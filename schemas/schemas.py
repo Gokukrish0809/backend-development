@@ -1,6 +1,8 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
+
+# ------------------- USER SCHEMAS -------------------
 
 class UserBase(BaseModel):
     username: str
@@ -19,10 +21,12 @@ class UserResponse(UserBase):
     class Config:
         from_attributes = True
 
+# ------------------- BOOK SCHEMAS -------------------
+
 class BookBase(BaseModel):
     title: str
     author: str
-    review_count: Optional[int] = 0
+    review_count: int = 0  # Default to 0
 
 class BookCreate(BookBase):
     pass
@@ -33,16 +37,18 @@ class BookResponse(BookBase):
     class Config:
         from_attributes = True
 
-class ReviewCreate(BaseModel):
-    book_title: str
-    book_author: str
-    review_text: str
+# ------------------- REVIEW SCHEMAS -------------------
 
-class ReviewUpdate(BaseModel):
-    id: int
+class ReviewBase(BaseModel):
     book_title: str
     book_author: str
-    review_text: str
+    review_text: str = Field(..., max_length=5000)  # Enforce 5000-character limit
+
+class ReviewCreate(ReviewBase):
+    pass
+
+class ReviewUpdate(ReviewBase):
+    id: int
 
 class ReviewResponse(BaseModel):
     id: int
@@ -57,8 +63,18 @@ class ReviewResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ReviewResponseGrouped(BaseModel):
+    id: int
+    user_id: int
+    review_text: str
+    sentiment: str
+    created_at: Optional[datetime] = None
+
+
+# ------------------- BOOK WITH REVIEWS RESPONSE -------------------
+
 class BookWithReviewsResponse(BaseModel):
     book_id: int
     book_title: str
     book_author: str
-    reviews: List[ReviewResponse]
+    reviews: List[ReviewResponseGrouped]
