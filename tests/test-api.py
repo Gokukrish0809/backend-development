@@ -24,7 +24,9 @@ from app.security import get_password_hash
 from datetime import timedelta, datetime, timezone
 from threading import Thread
 from collections import defaultdict
+from unittest.mock import patch
 import threading
+from ml.sentiment_analysis import analyze_sentiment
 import json
 import jwt
 import pytest
@@ -34,17 +36,18 @@ import time
 # -----------------------------------
 # Database Setup for Testing
 # -----------------------------------
-engine = create_engine(TEST_DATABASE_URL, isolation_level="SERIALIZABLE")
+engine = create_engine(TEST_DATABASE_URL, isolation_level="READ COMMITTED")
 TestingSessionLocal = sessionmaker(autocommit = False, autoflush = False, bind = engine)
 
 @pytest.fixture(autouse=True)
 def override_get_db(db_session: Session):
     """Override the database dependency to use a test session."""
     def _get_test_db():
+        db = TestingSessionLocal()  # Create a new session for every request
         try:
-            yield db_session
+            yield db
         finally:
-            pass
+            db.close()
     app.dependency_overrides[get_db] = _get_test_db
     yield
     app.dependency_overrides.pop(get_db, None)
@@ -130,15 +133,15 @@ def setup_test_data(db_session: Session):
     db_session.commit()
 
     # Add sample reviews (more varied timestamps and users)
-    review1 = Review(user_id=1, book_id=1, review_text="An amazing book! A must-read.", sentiment="positive", created_at=datetime.utcnow() - timedelta(days=2))
-    review2 = Review(user_id=1, book_id=2, review_text="Amazing book!", sentiment="positive", created_at=datetime.utcnow() - timedelta(days=1))
-    review3 = Review(user_id=2, book_id=2, review_text="This book changed my perspective on society.", sentiment="positive", created_at=datetime.utcnow() - timedelta(days=3))
-    review4 = Review(user_id=1, book_id=3, review_text="I found it quite dull and overrated.", sentiment="negative", created_at=datetime.utcnow() - timedelta(days=4))
-    review5 = Review(user_id=2, book_id=3, review_text="A deep and meaningful book.", sentiment="positive", created_at=datetime.utcnow() - timedelta(days=1))
-    review6 = Review(user_id=1, book_id=4, review_text="A literary masterpiece!", sentiment="positive", created_at=datetime.utcnow() - timedelta(hours=12))
-    review7 = Review(user_id=1, book_id=5, review_text="Not my cup of tea.", sentiment="negative", created_at=datetime.utcnow() - timedelta(days=5))
-    review8 = Review(user_id=2, book_id=5, review_text="Absolutely fantastic!", sentiment="positive", created_at=datetime.utcnow() - timedelta(hours=3))
-    review9 = Review(user_id=2, book_id=1, review_text="A classic that stands the test of time.", sentiment="positive", created_at=datetime.utcnow() - timedelta(minutes=30))
+    review1 = Review(user_id=1, book_id=1, review_text="An amazing book! A must-read.", sentiment=analyze_sentiment("An amazing book! A must-read."), created_at=datetime.utcnow() - timedelta(days=2))
+    review2 = Review(user_id=1, book_id=2, review_text="Amazing book!", sentiment=analyze_sentiment("Amazing book!"), created_at=datetime.utcnow() - timedelta(days=1))
+    review3 = Review(user_id=2, book_id=2, review_text="This book changed my perspective on society.", sentiment=analyze_sentiment("This book changed my perspective on society."), created_at=datetime.utcnow() - timedelta(days=3))
+    review4 = Review(user_id=1, book_id=3, review_text="I found it quite dull and overrated.", sentiment=analyze_sentiment("I found it quite dull and overrated."), created_at=datetime.utcnow() - timedelta(days=4))
+    review5 = Review(user_id=2, book_id=3, review_text="A deep and meaningful book.", sentiment=analyze_sentiment("A deep and meaningful book."), created_at=datetime.utcnow() - timedelta(days=1))
+    review6 = Review(user_id=1, book_id=4, review_text="A literary masterpiece!", sentiment=analyze_sentiment("A literary masterpiece!"), created_at=datetime.utcnow() - timedelta(hours=12))
+    review7 = Review(user_id=1, book_id=5, review_text="Not my cup of tea.", sentiment=analyze_sentiment("Not my cup of tea."), created_at=datetime.utcnow() - timedelta(days=5))
+    review8 = Review(user_id=2, book_id=5, review_text="Absolutely fantastic!", sentiment=analyze_sentiment("Absolutely fantastic!"), created_at=datetime.utcnow() - timedelta(hours=3))
+    review9 = Review(user_id=2, book_id=1, review_text="A classic that stands the test of time.", sentiment=analyze_sentiment("A classic that stands the test of time."), created_at=datetime.utcnow() - timedelta(minutes=30))
 
     db_session.add_all([review1, review4, review5, review6, review7, review8, review9])
     db_session.commit()
@@ -208,14 +211,9 @@ def test_create_review(setup_test_data):
     token = create_test_access_token(setup_test_data["users"][1])
     headers = {"Authorization": f"Bearer {token}"}
 
-    print(f"Token: {token}")  # Check if token is being generated correctly
-    print(headers)  # Ensure Authorization header is properly structured
-
     book_check = setup_test_data["books"]
-    print([book.title for book in book_check])  # Print all book titles
 
     response = client.post("/books/review/", headers=headers, json={"book_title": "Pride and Prejudice", "book_author": "Jane Austen", "review_text": "This book changed my whole perspective on life"})
-    print(response)
     assert response.status_code == 200
 
     data = response.json()
@@ -319,8 +317,13 @@ def test_concurrent_review_submission(setup_test_data):
     results = []
 
     def submit_review(headers, payload):
-        response = client.post("/books/review/", headers=headers, json=payload)
-        results.append(response.status_code)
+        try:
+            response = client.post("/books/review/", headers=headers, json=payload)
+            print(f"Response: {response.status_code} - {response.json()}")
+            results.append(response.status_code)
+        except Exception as e:
+            print(f"Exception in thread: {e}")
+            results.append(None)
 
     # Run both submissions concurrently
     thread1 = threading.Thread(target=submit_review, args=(headers1, review_payload1))
@@ -333,6 +336,9 @@ def test_concurrent_review_submission(setup_test_data):
     thread2.join()
 
     # Both requests should succeed
+    print(results)
+    assert results[0] == 200
+    assert results[1] == 200
     assert results.count(200) == 2
 
 ###############################################################################
@@ -352,3 +358,27 @@ def test_database_rollback_on_failure(setup_test_data, db_session):
     review_count = db_session.query(Review).count()
     assert review_count == len(setup_test_data["reviews"])  # No new reviews added
 
+###############################################################################
+#                     Sentiment Analysis API Integration Tests               #
+###############################################################################
+
+@patch("routes.reviews.analyze_sentiment")
+def test_review_sentiment_api_call(mock_analyze_sentiment, setup_test_data):
+    """Test that sentiment API is called correctly during review submission."""
+    token = create_test_access_token(setup_test_data["users"][0])
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Mock the API response
+    mock_analyze_sentiment.return_value = "positive"
+
+    review_payload = {
+        "book_title": "Brave New World",
+        "book_author": "Aldous Huxley",
+        "review_text": "Absolutely fantastic!"
+    }
+
+    response = client.post("/books/review/", headers=headers, json=review_payload)
+
+    assert response.status_code == 200
+    assert response.json()["sentiment"] == "positive"  # Assert correct sentiment storage
+    mock_analyze_sentiment.assert_called_once_with("Absolutely fantastic!")  # Assert API call
